@@ -61,6 +61,8 @@ Artifacts are written under `dist/`: CLI as `kuake-{version}-{os}-{arch}` and MC
 
 Download the archive for your OS from [Releases](https://github.com/zhangjingwei/kuake_cli/releases). Exact filenames follow the release page for each version.
 
+Directory downloads support concurrent transfers and resume from identity-checked state in the system user cache (`kuake/downloads`), not sibling `.part` files. Existing `.part` files are left untouched; old unverified partial files are downloaded again. Final installation uses a temporary copy in the destination directory, so additional disk space is required.
+
 ## Quick start
 
 1. Copy [.env.example](.env.example) to `.env` and fill in your Quark Cookie as described in the file (e.g. from the browser devtools Network tab). **Do not commit `.env`.** Alternatively, set the Cookie temporarily and run `kuake auth save`; the stored file uses mode `0600` on Linux/macOS and a protected, current-user-only ACL on Windows.

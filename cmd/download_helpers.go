@@ -164,28 +164,8 @@ func listDirectoryItems(client *sdk.QuarkClient, remoteRoot, localRoot string) (
 					skipped++
 					continue
 				}
-				// 兼容旧版本直接写入最终路径所留下的不完整文件。
-				// 将其迁移为 .part，随后 DownloadFile 会通过 Range 续传。
-				if info.Size() > 0 && info.Size() < child.Size {
-					partialPath := localPath + ".part"
-					partialInfo, partialErr := os.Stat(partialPath)
-					if os.IsNotExist(partialErr) {
-						if err := os.Rename(localPath, partialPath); err != nil {
-							return nil, 0, 0, fmt.Errorf("migrate partial file %s: %w", localPath, err)
-						}
-					} else if partialErr == nil && partialInfo.Size() < info.Size() {
-						if err := os.Remove(partialPath); err != nil {
-							return nil, 0, 0, fmt.Errorf("replace shorter partial file %s: %w", partialPath, err)
-						}
-						if err := os.Rename(localPath, partialPath); err != nil {
-							return nil, 0, 0, fmt.Errorf("migrate partial file %s: %w", localPath, err)
-						}
-					} else if partialErr == nil {
-						if err := os.Remove(localPath); err != nil {
-							return nil, 0, 0, fmt.Errorf("remove shorter legacy partial file %s: %w", localPath, err)
-						}
-					}
-				}
+				// A smaller final file is not authenticated resume state. Leave it
+				// and any legitimate sibling .part file untouched until replacement.
 			}
 			items = append(items, directoryDownloadItem{
 				RemotePath: child.Path,

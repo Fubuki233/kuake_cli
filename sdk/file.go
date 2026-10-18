@@ -3047,12 +3047,22 @@ func (qc *QuarkClient) DownloadFile(fid, destPath, fileName string, progressCall
 			return fmt.Errorf("create local dir: %w", err)
 		}
 	}
-	partialPath := path + ".part"
+	absoluteTarget, err := filepath.Abs(path)
+	if err != nil {
+		return err
+	}
+	unlock := lockDownload(absoluteTarget)
+	defer unlock()
+	partialPath, err := prepareDownloadPartial(fid, absoluteTarget)
+	if err != nil {
+		return fmt.Errorf("prepare download state: %w", err)
+	}
 	var resumeOffset int64
 	if info, statErr := os.Stat(partialPath); statErr == nil && info.Mode().IsRegular() {
 		resumeOffset = info.Size()
 	}
 
+retryDownload:
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Hour)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "GET", downloadURL, nil)
@@ -3118,7 +3128,8 @@ func (qc *QuarkClient) DownloadFile(fid, destPath, fileName string, progressCall
 		if err := os.Remove(partialPath); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("reset partial file: %w", err)
 		}
-		return qc.DownloadFile(fid, path, fileName, progressCallback)
+		resumeOffset = 0
+		goto retryDownload
 	}
 	if resp.StatusCode == http.StatusPartialContent {
 		rangeStart, rangeErr := parseContentRangeStart(resp.Header.Get("Content-Range"))
@@ -3133,7 +3144,8 @@ func (qc *QuarkClient) DownloadFile(fid, destPath, fileName string, progressCall
 			if err := os.Remove(partialPath); err != nil && !os.IsNotExist(err) {
 				return fmt.Errorf("reset partial file after Content-Range mismatch: %w", err)
 			}
-			return qc.DownloadFile(fid, path, fileName, progressCallback)
+			resumeOffset = 0
+			goto retryDownload
 		}
 	}
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusPartialContent {
@@ -3156,7 +3168,7 @@ func (qc *QuarkClient) DownloadFile(fid, destPath, fileName string, progressCall
 	} else {
 		flags |= os.O_TRUNC
 	}
-	out, err := os.OpenFile(partialPath, flags, 0o644)
+	out, err := os.OpenFile(partialPath, flags, 0o600)
 	if err != nil {
 		return fmt.Errorf("open partial file: %w", err)
 	}
@@ -3197,10 +3209,7 @@ func (qc *QuarkClient) DownloadFile(fid, destPath, fileName string, progressCall
 	if err := out.Close(); err != nil {
 		return fmt.Errorf("close partial file: %w", err)
 	}
-	if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-		return fmt.Errorf("replace destination file: %w", err)
-	}
-	if err := os.Rename(partialPath, path); err != nil {
+	if err := installDownloadedFile(partialPath, path); err != nil {
 		return fmt.Errorf("finalize download: %w", err)
 	}
 	return nil

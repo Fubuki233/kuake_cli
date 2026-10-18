@@ -1126,6 +1126,7 @@ func TestGetDownloadURL_RetriesLargeFileAsDesktopClient(t *testing.T) {
 }
 
 func TestDownloadFileResumesPartialDownload(t *testing.T) {
+	isolateDownloadCache(t)
 	content := []byte("hello resumable world")
 	rangeSeen := ""
 	var server *httptest.Server
@@ -1155,11 +1156,15 @@ func TestDownloadFileResumesPartialDownload(t *testing.T) {
 	qc.authCheckValid = true
 	qc.lastAuthCheck = time.Now()
 	destination := filepath.Join(t.TempDir(), "result.bin")
-	if err := os.WriteFile(destination+".part", content[:6], 0o600); err != nil {
+	partialPath, err := prepareDownloadPartial("aea936a39e444e30956165f496c19f16", destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partialPath, content[:6], 0o600); err != nil {
 		t.Fatal(err)
 	}
 	var firstProgress int64 = -1
-	err := qc.DownloadFile("aea936a39e444e30956165f496c19f16", destination, "result.bin", func(progress *DownloadProgress) {
+	err = qc.DownloadFile("aea936a39e444e30956165f496c19f16", destination, "result.bin", func(progress *DownloadProgress) {
 		if firstProgress == -1 {
 			firstProgress = progress.Downloaded
 		}
@@ -1177,12 +1182,13 @@ func TestDownloadFileResumesPartialDownload(t *testing.T) {
 	if string(got) != string(content) {
 		t.Fatalf("downloaded content = %q", got)
 	}
-	if _, err := os.Stat(destination + ".part"); !os.IsNotExist(err) {
+	if _, err := os.Stat(partialPath); !os.IsNotExist(err) {
 		t.Fatalf("partial file still exists: %v", err)
 	}
 }
 
 func TestDownloadFileRestartsWhenContentRangeDoesNotMatchPartialFile(t *testing.T) {
+	isolateDownloadCache(t)
 	content := []byte("hello resumable world")
 	var blobRequests int
 	var ranges []string
@@ -1216,7 +1222,11 @@ func TestDownloadFileRestartsWhenContentRangeDoesNotMatchPartialFile(t *testing.
 	qc.authCheckValid = true
 	qc.lastAuthCheck = time.Now()
 	destination := filepath.Join(t.TempDir(), "result.bin")
-	if err := os.WriteFile(destination+".part", []byte("wrong!"), 0o600); err != nil {
+	partialPath, err := prepareDownloadPartial("aea936a39e444e30956165f496c19f16", destination)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(partialPath, []byte("wrong!"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	if err := qc.DownloadFile("aea936a39e444e30956165f496c19f16", destination, "result.bin", nil); err != nil {
@@ -1235,7 +1245,7 @@ func TestDownloadFileRestartsWhenContentRangeDoesNotMatchPartialFile(t *testing.
 	if string(got) != string(content) {
 		t.Fatalf("downloaded content = %q, want %q", got, content)
 	}
-	if _, err := os.Stat(destination + ".part"); !os.IsNotExist(err) {
+	if _, err := os.Stat(partialPath); !os.IsNotExist(err) {
 		t.Fatalf("partial file still exists: %v", err)
 	}
 }
